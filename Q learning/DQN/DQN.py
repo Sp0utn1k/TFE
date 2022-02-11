@@ -5,26 +5,28 @@ import numpy as np
 from collections import namedtuple, deque
 import gym
 import matplotlib
-matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import math
 import time
 import copy
 
 Episode = namedtuple('Episode',['S','A','R','S_','done'])
-batch_size = 200
-BUFFER_SIZE
-EPOCHS = 2000
+batch_size = 128
+BUFFER_SIZE = 10000
+N_episodes = 100000
 POINTS_ON_PLOT = 500
+N_demos = 10
 
 EPSILON_DECAY = {
-				'period':.9*EPOCHS,
-				'start':1,
-				'stop':.02
+				'period': 50000,
+				'start':.9,
+				'stop':.01,
+				'shape':'linear'
 				}
-GAMMA = .99
-ALPHA = 1e-3
+GAMMA = .999
+ALPHA = 1e-4
 NET_SYNC_PERIOD = 20
+PRINT_PROGRESS_PERIOD = 1000
 
 class NeuralNetwork(nn.Module):
 	def __init__(self,n_inputs,n_outputs):
@@ -32,10 +34,7 @@ class NeuralNetwork(nn.Module):
 		self.pipe = nn.Sequential(
 			nn.Linear(n_inputs,64),
 			nn.ReLU(),
-			nn.Linear(64,32),
-			nn.ReLU(),
-			nn.Linear(32,n_outputs),
-			nn.Softmax(dim=1)
+			nn.Linear(64,n_outputs),
 		)
 	def forward(self,x):
 		return self.pipe(x)
@@ -45,57 +44,70 @@ class Agent:
 	def __init__(self,*args,**kwargs):
 		assert('n_states' and 'n_actions' in kwargs.keys())
 		
+		self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+		print(f'Device: {self.device}')
 		self.n_states = kwargs['n_states']
 		self.n_actions = kwargs['n_actions']
-		self.net = NeuralNetwork(self.n_states,self.n_actions)
-		self.net2 = NeuralNetwork(self.n_states,self.n_actions)
+		self.net = NeuralNetwork(self.n_states,self.n_actions).to(self.device)
+		self.net2 = NeuralNetwork(self.n_states,self.n_actions).to(self.device)
+		self.net2.eval()
 		
 		self.epsilon = kwargs.get('epsilon',.5)
 		self.gamma = kwargs.get('gamma',.9)
 		self.alpha = kwargs.get('alpha',1e-3)
 
-		self.loss_fn = nn.MSELoss()
-		self.optimizer = torch.optim.Adam(self.net.parameters(), lr=self.alpha)
+		# self.loss_fn = nn.MSELoss()
+		self.loss_fn = nn.SmoothL1Loss()
+		self.optimizer = torch.optim.RMSprop(self.net.parameters())
 
 		if 'epsilon_decay' in kwargs.keys():
 			self.eps_min = kwargs['epsilon_decay']['stop']
 			self.eps_max = kwargs['epsilon_decay']['start']
-			self.eps_rate = math.log(self.eps_min/self.eps_max)/kwargs['epsilon_decay']['period']
-
+			self.eps_period = kwargs['epsilon_decay']['period']
+			self.eps_decay_shape = kwargs['epsilon_decay']['shape']
 
 	def sync_nets(self):
 		self.net2.load_state_dict(self.net.state_dict())
 
 	def set_epsilon(self,t):
-		self.epsilon = max(self.eps_min,self.eps_max*math.exp(t*self.eps_rate))
+		shape = self.eps_decay_shape.lower()
+		if shape == 'exponential':
+			rate = math.log(self.eps_min/self.eps_max)/self.eps_period
+			epsilon = self.eps_max*math.exp(t*rate)
+		elif shape == 'linear':
+			rate = (self.eps_max-self.eps_min)/self.eps_period
+			epsilon = self.eps_max - t*rate
+		else:
+			print('Unknown epsilon decay shape')
+		self.epsilon = max(self.eps_min,epsilon)
 
 	def get_action(self,S):
 		assert(S.shape[0] == 1)
 		if random.random() < self.epsilon:
 			A = random.randrange(self.n_actions)
 		else:
-			A = self.net(S).squeeze().argmax().numpy()
+			with torch.no_grad():
+				A = self.net(S.to(self.device)).detach().cpu().squeeze().argmax().numpy()
 		return int(A)
 
-	def update(self,batch,device='cpu'):
-		
-		S = torch.cat([episode.S for episode in batch]).to(device)
-		A_mask = [list(np.arange(len(batch))),[episode.A for episode in batch]]
-		# A_mask = torch.cat((A,torch.arange(len(A)))).reshape(2,-1).transpose(0,1)
-		A = torch.zeros((len(batch),self.n_actions),dtype=torch.bool).to(device)
-		A[A_mask] = True
-		R = torch.tensor([episode.R for episode in batch]).to(device)
-		S_ = torch.cat([episode.S_ for episode in batch]).to(device)
-		done = torch.tensor([episode.done for episode in batch]).to(device)
+	def train_net(self,batch):
+
+		device = self.device
+		S = torch.cat([episode.S for episode in batch])
+		A = torch.tensor([episode.A for episode in batch],device=device)
+		R = torch.tensor([episode.R for episode in batch],device=device)
+		S_ = torch.cat([episode.S_ for episode in batch])
+		done = torch.cuda.BoolTensor([episode.done for episode in batch])
 
 		with torch.no_grad():
-			Q_ = self.net2(S_)
-			Q_ = ~done*torch.max(Q_,dim=1).values.detach()
+			Q_ = self.net2(S_).max(1)[0]
+			Q_[done] = 0.0
+			Q_ = Q_.detach()
 		
-		Q = self.net(S)[A]
-		target = R + Q_*self.gamma
+		Q = self.net(S).gather(1, A.unsqueeze(-1)).squeeze(-1)
+		target_Q = R + Q_*self.gamma
+		loss = self.loss_fn(target_Q,Q)
 
-		loss = self.loss_fn(Q,target)
 		self.optimizer.zero_grad()
 		loss.backward()
 		self.optimizer.step()
@@ -114,6 +126,7 @@ class Buffer:
     def sample(self, batch_size):
         indices = np.random.choice(len(self.buffer), batch_size, replace=False)
         batch = [self.buffer[idx] for idx in indices]
+        return batch
 
 
 def append(batch,episode):
@@ -130,29 +143,41 @@ if __name__ == "__main__":
 	agent = Agent(n_states=obs_space,n_actions=n_actions,gamma=GAMMA,alpha=ALPHA,epsilon_decay=EPSILON_DECAY)
 	buffer = Buffer(BUFFER_SIZE)
 
-
 	total_R = 0
 	R_plot = []
-	for epoch in range(EPOCHS):
-		batch = []
-		done = False
-		S = torch.tensor(env.reset()).unsqueeze(0)
-		while not done:
-			A = agent.get_action(S)
-			S_, R, done, _ = env.step(A)
-			total_R += R
-			S_ = torch.tensor(S_).unsqueeze(0)
-			S = S_
-			episode = Episode(S,A,R,S_,done)
-			buffer.append(episode)
+	S = torch.tensor(env.reset(),device=agent.device).unsqueeze(0)
+	for step in range(N_episodes):
+		env.render()
+		agent.set_epsilon(step)		
+		A = agent.get_action(S)
+		S_, R, done, _ = env.step(A)
+		total_R += R
+		S_ = torch.tensor(S_,device=agent.device).unsqueeze(0)
+		S = S_
+		episode = Episode(S,A,R,S_,done)
+		buffer.append(episode)
 
-		R_plot += [total_R]
-		total_R = 0
-		if epoch % NET_SYNC_PERIOD == 0:
+		if done:
+			R_plot += [total_R]
+			total_R = 0
+			S = torch.tensor(env.reset(),device=agent.device).unsqueeze(0)
+
+
+		if step % PRINT_PROGRESS_PERIOD == 0:
+			print(f'step {step} / {N_episodes}')
+
+
+		if len(buffer) < batch_size:
+			continue
+
+		agent.train_net(buffer.sample(batch_size))
+
+		if step % NET_SYNC_PERIOD == 0:
 			agent.sync_nets()
-			print(f'{epoch}/{EPOCHS}')
+			# for param in agent.net.parameters():
+  	# 			print(param.data)
+		
 
-		agent.update(batch,device='cpu')
 
 	if len(R_plot) > POINTS_ON_PLOT:
 		K = int(len(R_plot)//POINTS_ON_PLOT)
@@ -161,4 +186,16 @@ if __name__ == "__main__":
 		plt.plot(t,R_reduced)
 	else:
 		plt.plot(R_plot)
-	plt.savefig("first_pytorch.png")
+
+	plt.show()
+
+	# Demo:
+	agent.epsilon = 0
+	for _ in range(N_demos):
+		done = False
+		S = torch.tensor(env.reset(),device=agent.device).unsqueeze(0)
+		while not done:
+			env.render()
+			A = agent.get_action(S)
+			S, _, done, _ = env.step(A)
+			S = torch.tensor(S,device=agent.device).unsqueeze(0)

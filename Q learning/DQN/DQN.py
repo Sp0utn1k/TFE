@@ -10,22 +10,24 @@ import math
 import time
 import copy
 
+
 Episode = namedtuple('Episode',['S','A','R','S_','done'])
 batch_size = 128
-BUFFER_SIZE = 10000
+BUFFER_SIZE = 5000
 N_episodes = 100000
 POINTS_ON_PLOT = 500
-N_demos = 10
+N_demos = 5
 
 EPSILON_DECAY = {
-				'period': 50000,
-				'start':.9,
-				'stop':.01,
+				'period': 80000,
+				'start':1,
+				'stop':.05,
 				'shape':'linear'
 				}
+
 GAMMA = .999
-ALPHA = 1e-4
-NET_SYNC_PERIOD = 20
+ALPHA = 1e-3
+NET_SYNC_PERIOD = 10
 PRINT_PROGRESS_PERIOD = 1000
 
 class NeuralNetwork(nn.Module):
@@ -34,7 +36,9 @@ class NeuralNetwork(nn.Module):
 		self.pipe = nn.Sequential(
 			nn.Linear(n_inputs,64),
 			nn.ReLU(),
-			nn.Linear(64,n_outputs),
+			nn.Linear(64,64),
+			nn.ReLU(),
+			nn.Linear(64,n_outputs)
 		)
 	def forward(self,x):
 		return self.pipe(x)
@@ -56,15 +60,16 @@ class Agent:
 		self.gamma = kwargs.get('gamma',.9)
 		self.alpha = kwargs.get('alpha',1e-3)
 
-		# self.loss_fn = nn.MSELoss()
-		self.loss_fn = nn.SmoothL1Loss()
-		self.optimizer = torch.optim.RMSprop(self.net.parameters())
+		self.loss_fn = nn.MSELoss()
+		# self.loss_fn = nn.SmoothL1Loss()
+		self.optimizer = torch.optim.Adam(self.net.parameters(),lr=self.alpha)
 
 		if 'epsilon_decay' in kwargs.keys():
 			self.eps_min = kwargs['epsilon_decay']['stop']
 			self.eps_max = kwargs['epsilon_decay']['start']
 			self.eps_period = kwargs['epsilon_decay']['period']
 			self.eps_decay_shape = kwargs['epsilon_decay']['shape']
+			self.epsilon = self.eps_max
 
 	def sync_nets(self):
 		self.net2.load_state_dict(self.net.state_dict())
@@ -87,7 +92,7 @@ class Agent:
 			A = random.randrange(self.n_actions)
 		else:
 			with torch.no_grad():
-				A = self.net(S.to(self.device)).detach().cpu().squeeze().argmax().numpy()
+				A = self.net(S.to(self.device)).cpu().squeeze().argmax().numpy()
 		return int(A)
 
 	def train_net(self,batch):
@@ -95,23 +100,25 @@ class Agent:
 		device = self.device
 		S = torch.cat([episode.S for episode in batch])
 		A = torch.tensor([episode.A for episode in batch],device=device)
+		# print(sum(A)/len(A))
 		R = torch.tensor([episode.R for episode in batch],device=device)
 		S_ = torch.cat([episode.S_ for episode in batch])
 		done = torch.cuda.BoolTensor([episode.done for episode in batch])
 
+		# print(f'S {S.size()}, A {A.size()}, R {R.size()}, S_ {S_.size()}, done {done.size()}')
 		with torch.no_grad():
 			Q_ = self.net2(S_).max(1)[0]
 			Q_[done] = 0.0
 			Q_ = Q_.detach()
 		
 		Q = self.net(S).gather(1, A.unsqueeze(-1)).squeeze(-1)
-		target_Q = R + Q_*self.gamma
-		loss = self.loss_fn(target_Q,Q)
+		target_Q = R + self.gamma*Q_
+
+		loss = self.loss_fn(Q,target_Q)
 
 		self.optimizer.zero_grad()
 		loss.backward()
 		self.optimizer.step()
-
 
 class Buffer:
     def __init__(self, maxlen):
@@ -127,7 +134,6 @@ class Buffer:
         indices = np.random.choice(len(self.buffer), batch_size, replace=False)
         batch = [self.buffer[idx] for idx in indices]
         return batch
-
 
 def append(batch,episode):
 	assert(isinstance(episode,Episode))
@@ -147,24 +153,26 @@ if __name__ == "__main__":
 	R_plot = []
 	S = torch.tensor(env.reset(),device=agent.device).unsqueeze(0)
 	for step in range(N_episodes):
-		env.render()
-		agent.set_epsilon(step)		
+		# env.render()
+		agent.set_epsilon(step)
 		A = agent.get_action(S)
 		S_, R, done, _ = env.step(A)
-		total_R += R
 		S_ = torch.tensor(S_,device=agent.device).unsqueeze(0)
-		S = S_
 		episode = Episode(S,A,R,S_,done)
 		buffer.append(episode)
+
+		S = copy.deepcopy(S_)
+		total_R += R
 
 		if done:
 			R_plot += [total_R]
 			total_R = 0
 			S = torch.tensor(env.reset(),device=agent.device).unsqueeze(0)
 
-
 		if step % PRINT_PROGRESS_PERIOD == 0:
 			print(f'step {step} / {N_episodes}')
+			# for param in agent.net.parameters():
+  	# 			print(param)
 
 
 		if len(buffer) < batch_size:
@@ -174,11 +182,7 @@ if __name__ == "__main__":
 
 		if step % NET_SYNC_PERIOD == 0:
 			agent.sync_nets()
-			# for param in agent.net.parameters():
-  	# 			print(param.data)
 		
-
-
 	if len(R_plot) > POINTS_ON_PLOT:
 		K = int(len(R_plot)//POINTS_ON_PLOT)
 		R_reduced = R_plot[0::K]

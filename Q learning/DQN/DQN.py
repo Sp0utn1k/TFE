@@ -6,23 +6,24 @@ from collections import namedtuple, deque
 import gym
 import matplotlib
 import matplotlib.pyplot as plt
+# plt.ion()
 import math
 import time
 import copy
 
 
 Episode = namedtuple('Episode',['S','A','R','S_','done'])
-batch_size = 128
+BATCH_SIZE = 128
 BUFFER_SIZE = 5000
-N_episodes = 100000
+N_episodes = 12000
 POINTS_ON_PLOT = 500
 N_demos = 5
 
 EPSILON_DECAY = {
-				'period': 80000,
+				'period': 10000,
 				'start':1,
-				'stop':.05,
-				'shape':'linear'
+				'stop':.02,
+				'shape':'exponential'
 				}
 
 GAMMA = .999
@@ -130,8 +131,8 @@ class Buffer:
     def append(self, experience):
         self.buffer.append(experience)
 
-    def sample(self, batch_size):
-        indices = np.random.choice(len(self.buffer), batch_size, replace=False)
+    def sample(self, BATCH_SIZE):
+        indices = np.random.choice(len(self.buffer), BATCH_SIZE, replace=False)
         batch = [self.buffer[idx] for idx in indices]
         return batch
 
@@ -175,10 +176,10 @@ if __name__ == "__main__":
   	# 			print(param)
 
 
-		if len(buffer) < batch_size:
+		if len(buffer) < BATCH_SIZE:
 			continue
 
-		agent.train_net(buffer.sample(batch_size))
+		agent.train_net(buffer.sample(BATCH_SIZE))
 
 		if step % NET_SYNC_PERIOD == 0:
 			agent.sync_nets()
@@ -190,6 +191,7 @@ if __name__ == "__main__":
 		plt.plot(t,R_reduced)
 	else:
 		plt.plot(R_plot)
+		pass
 
 	plt.show()
 

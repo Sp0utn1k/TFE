@@ -6,6 +6,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 from torch import nn
 
+
 def flatten(l):
     "flattens a list"
     return [item for sublist in l for item in sublist]
@@ -37,17 +38,18 @@ def transform_episode(episode):
     return new_episode
 
 class EpisodeStep:
-    def __init__(self, observation, action, reward, done, next_obs, state, next_state):
+    def __init__(self, observation, mask, action, reward, done, next_obs, next_mask):
         self.observation = observation
+        self.mask = mask
         self.action = action
         self.reward = reward
         self.done = done
         self.next_obs = next_obs
-        self.state = state
-        self.next_state = next_state
+        self.next_mask = next_mask
+        self.counter = 0
     
     def __iter__(self):
-        all = self.__dict__.values()
+        all = [self.observation, self.mask, self.action, self.reward, self.done, self.next_obs, self.next_mask]
         return iter(all)
     
     def __repr__(self):

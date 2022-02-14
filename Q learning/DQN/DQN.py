@@ -13,9 +13,9 @@ import copy
 
 
 Episode = namedtuple('Episode',['S','A','R','S_','done'])
-BATCH_SIZE = 128
+BATCH_SIZE = 256
 BUFFER_SIZE = 5000
-N_episodes = 12000
+N_episodes = 15000
 POINTS_ON_PLOT = 500
 N_demos = 5
 

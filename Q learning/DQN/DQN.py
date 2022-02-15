@@ -11,7 +11,6 @@ import math
 import time
 import copy
 
-
 Episode = namedtuple('Episode',['S','A','R','S_','done'])
 BATCH_SIZE = 256
 BUFFER_SIZE = 5000
@@ -145,6 +144,7 @@ if __name__ == "__main__":
 
 	env = gym.make("CartPole-v0")
 	obs_space = env.observation_space.shape[0]
+	print(env.action_space)
 	n_actions = env.action_space.n
 
 	agent = Agent(n_states=obs_space,n_actions=n_actions,gamma=GAMMA,alpha=ALPHA,epsilon_decay=EPSILON_DECAY)
@@ -174,7 +174,6 @@ if __name__ == "__main__":
 			print(f'step {step} / {N_episodes}')
 			# for param in agent.net.parameters():
   	# 			print(param)
-
 
 		if len(buffer) < BATCH_SIZE:
 			continue

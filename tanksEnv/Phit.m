@@ -1,7 +1,9 @@
 clc;clear;close all;
 
-r = linspace(0,20)';
-R50 = 12;
+vis = 10;
+R50 = .8*vis;
+
+r = linspace(0,vis)';
 sig = 1.0./ (1+exp((r-R50).*12./R50));
 
 plot(r,100*sig)

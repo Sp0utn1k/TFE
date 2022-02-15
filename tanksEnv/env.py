@@ -344,19 +344,7 @@ def norm(vect1,vect2):
 	return math.sqrt(res)
 
 def los(vect1,vect2):
-def get_los(vect1,vect2,los_dict):
 
-    if vect2[0] < vect1[0]:
-        vect1,vect2 = vect2,vect1
-
-    diff = [vect2[0]-vect1[0],vect2[1]-vect1[1]]
-    mirrored = False
-    if diff[1] < 0:
-        mirrored = True
-        diff[1] = -diff[1]
-
-    los = [[i+vect1[0],j*(-1)**mirrored+vect1[1]] for [i,j] in los_dict[tuple(diff)]]
-    return los
     if vect2[0] < vect1[0]:
         vect1,vect2 = vect2,vect1
 

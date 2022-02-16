@@ -1,8 +1,5 @@
-## Welcome to GitHub Pages
-
-You can use the [editor on GitHub](https://github.com/Sp0utn1k/tfe/edit/gh-pages/index.md) to maintain and preview the content for your website in Markdown files.
-
-Whenever you commit to this repository, GitHub Pages will run [Jekyll](https://jekyllrb.com/) to rebuild the pages in your site, from the content in your Markdown files.
+# Master Thesis
+## presented to obtain the academic degree of Master in Engineering Science under the supervision of Senior Captain Koen BOECKX, Dr. ir.
 
 ### Markdown
 

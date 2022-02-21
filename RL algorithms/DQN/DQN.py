@@ -31,15 +31,19 @@ NET_SYNC_PERIOD = 10
 PRINT_PROGRESS_PERIOD = 1000
 
 class NeuralNetwork(nn.Module):
-	def __init__(self,n_inputs,n_outputs):
+	def __init__(self,n_inputs,n_outputs,hidden_layers):
 		super(NeuralNetwork,self).__init__()
-		self.pipe = nn.Sequential(
-			nn.Linear(n_inputs,64),
-			nn.ReLU(),
-			nn.Linear(64,64),
-			nn.ReLU(),
-			nn.Linear(64,n_outputs)
-		)
+		net = []
+		layers = [n_inputs] + hidden_layers + [n_outputs]
+		layer = n_inputs
+
+		for next_layer in hidden_layers:
+			net += [nn.Linear(layer,next_layer),nn.ReLU()]
+			layer = next_layer
+		net += [nn.Linear(layer,n_outputs)]
+
+		self.pipe = nn.Sequential(*net)
+
 	def forward(self,x):
 		return self.pipe(x)
 
@@ -52,17 +56,17 @@ class Agent:
 		print(f'Device: {self.device}')
 		self.n_states = kwargs['n_states']
 		self.n_actions = kwargs['n_actions']
-		self.net = NeuralNetwork(self.n_states,self.n_actions).to(self.device)
-		self.net2 = NeuralNetwork(self.n_states,self.n_actions).to(self.device)
+
+		self.net = NeuralNetwork(self.n_states,self.n_actions,kwargs.get('hidden_layers',[64])).to(self.device)
+		self.net2 = NeuralNetwork(self.n_states,self.n_actions,kwargs.get('hidden_layers',[64])).to(self.device)
 		self.net2.eval()
 		
 		self.epsilon = kwargs.get('epsilon',.5)
 		self.gamma = kwargs.get('gamma',.9)
-		self.alpha = kwargs.get('alpha',1e-3)
 
 		self.loss_fn = nn.MSELoss()
 		# self.loss_fn = nn.SmoothL1Loss()
-		self.optimizer = torch.optim.Adam(self.net.parameters(),lr=self.alpha)
+		self.optimizer = torch.optim.Adam(self.net.parameters())
 
 		if 'epsilon_decay' in kwargs.keys():
 			self.eps_min = kwargs['epsilon_decay']['stop']
@@ -140,8 +144,7 @@ def append(batch,episode):
 	batch = np.append(batch,np.array([episode],dtype=Episode))
 	return batch
 
-if __name__ == "__main__":
-
+if __name__ == "__main__":	
 	env = gym.make("CartPole-v0")
 	obs_space = env.observation_space.shape[0]
 	print(env.action_space)

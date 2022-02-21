@@ -1,17 +1,28 @@
 class Args:
 	
 	# Environment
-	size = 10
-	N_blue = 2
-	N_red = 2
-	N_players = N_red+N_blue
-	visibility = 9.0
+	size = 11
+	observation_map_size = 25
+
+	players_description = [
+		{'pos0':'random','team':'red','replicas':2},
+		{'pos0':'random','team':'blue','replicas':2}
+	]
+
+	# players_description = [
+	# 	{'pos0':[0,0],'team':'red'},
+	# 	{'pos0':[0,9],'team':'red'},
+	# 	{'pos0':[9,0],'team':'blue'},
+	# 	{'pos0':[9,9],'team':'blue'}
+	# ]
+
+	visibility = 20
 	R50 = .8*visibility
-	obstacles = [[x,y] for x in range(4,6) for y in range(5,6)]
+	obstacles = [[x,y] for x in range(1,10) for y in [5]]
+	# obstacles = []
 
 	# Agent
 	N_aim = 4
-	obs_size = N_aim*5
 	dropout = 0.4
 	hidden = [256,128,64]
 

@@ -75,6 +75,7 @@ class State:
                                     if other.team!=agent.team],
                         'obstacles': self.obstacles
                     }
+                    
         # squash all values in a single array
         observation = np.concatenate([np.squeeze(val).flatten() for val in observation.values()])
 

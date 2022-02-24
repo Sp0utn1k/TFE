@@ -9,12 +9,12 @@ from tensorboardX import SummaryWriter
 
 BUFFER_SIZE = 256
 BATCH_SIZE = 64
-LEARNING_RATE = 1e-3
-N_EPISODES = 30000
+LEARNING_RATE = 1e-4
+N_EPISODES = 50000
 N_demos = 5
 GAMMA = .999
 PRINT_PROGRESS_PERIOD = 50
-NET_SYNC_PERIOD = 2
+NET_SYNC_PERIOD = 1
 MAX_CYCLES = 64
 USE_QMIXER = True
 
@@ -301,7 +301,7 @@ def show_demo(env,agents,device='cpu',repeat=1):
 
 if __name__ == '__main__':
 
-	writer = SummaryWriter(f'runs/use_QMixer={USE_QMIXER}')
+	writer = SummaryWriter(f'runs/QMixer={USE_QMIXER}_{N_EPISODES} episodes')
 	device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 	# device = 'cpu'
 	print(f'Device:{device}')
@@ -325,6 +325,8 @@ if __name__ == '__main__':
 			R = sum(R)/len(R)
 			print(f'Episode {episode_n}, Reward {round(R)}, Epsilon {round(epsilon,2)}')
 			writer.add_scalar('reward', R, episode_n)
+			# for agent in mixer.agents.values():
+			# 	print(list(agent.net.parameters())[0])
 
 		if len(buffer) < BATCH_SIZE:
 			continue
@@ -336,8 +338,9 @@ if __name__ == '__main__':
 		mixer.learn(batch)
 
 		# print(list(mixer.agents['agent_0'].target_net.parameters())[-1])
-
-	for agent in mixer.agents.values():
-		agent.epsilon = 0
-		agent.net.eval()
-	show_demo(env,mixer.agents,device=device,repeat=N_demos)
+	txt = input('Press enter to show demo ("skip" to skip)')
+	if not txt.lower() == 'skip':
+		for agent in mixer.agents.values():
+			agent.epsilon = 0
+			agent.net.eval()
+		show_demo(env,mixer.agents,device=device,repeat=N_demos)

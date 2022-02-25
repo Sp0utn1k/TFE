@@ -7,21 +7,23 @@ import copy
 import math
 from tensorboardX import SummaryWriter
 
-BUFFER_SIZE = 256
+BUFFER_SIZE = 512
 BATCH_SIZE = 64
 LEARNING_RATE = 1e-4
-N_EPISODES = 50000
+N_EPISODES = 12000
 N_demos = 5
-GAMMA = .999
+GAMMA = .9
 PRINT_PROGRESS_PERIOD = 50
-NET_SYNC_PERIOD = 1
+NET_SYNC_PERIOD = 2
 MAX_CYCLES = 64
 USE_QMIXER = True
+P_DROPOUT = 0
+N_AGENTS = 3
 
 EPSILON_DECAY = {
-				'period': N_EPISODES,
+				'period': 0.8*N_EPISODES,
 				'start':1,
-				'stop':.05,
+				'stop':.02,
 				'shape':'exponential'
 				}
 
@@ -74,7 +76,7 @@ class VDNMixer:
 		return []
 
 class Mixer:
-	def __init__(self,env,device='cpu',use_QMixer=True,**kwargs):
+	def __init__(self,env,device='cpu',use_QMixer=True,p_dropout=0,**kwargs):
 
 		self.agent_names = copy.copy(env.agents)
 		obs_space = env.observation_space(self.agent_names[0]).shape[0]
@@ -82,12 +84,13 @@ class Mixer:
 		self.state_space = env.state_space.shape[0]
 
 		self.agents = {}
+		agentNet = AgentDQN(obs_space,self.action_space,hidden_layers=[('linear',64),('linear',32)],
+				device=device,p_dropout=p_dropout)
 		for name in self.agent_names:
-			agentNet = AgentDQN(obs_space,self.action_space,hidden_layers=[('linear',64),('linear',32)],device=device)
 			self.agents[name] = Agent(name,agentNet,epsilon=1,epsilon_decay=EPSILON_DECAY)
 
 		if use_QMixer:
-			self.net = QMixer(self.state_space,len(self.agents)).to(device)
+			self.net = QMixer(self.state_space,len(self.agents),p_dropout=p_dropout).to(device)
 		else:
 			self.net = VDNMixer()
 		self.target_net = copy.deepcopy(self.net)
@@ -98,8 +101,9 @@ class Mixer:
 
 		self.loss_fn = nn.MSELoss()
 		parameters = list(self.net.parameters())
-		for agent in self.agents.values():
-			parameters += list(agent.net.parameters())
+		# for agent in self.agents.values():
+		# 	parameters += list(agent.net.parameters())
+		parameters += list(agentNet.parameters())
 		
 		self.optimizer = torch.optim.Adam(parameters,lr=lr)
 
@@ -159,6 +163,7 @@ class Mixer:
 
 		# print(f'R: {R.shape}')
 		# print(f'dones: {dones.shape}')
+		return loss.item()
 
 class AgentDQN(nn.Module):
 	def __init__(self,n_inputs,n_outputs,hidden_layers=[],device='cpu',p_dropout=.3):
@@ -295,23 +300,23 @@ def show_demo(env,agents,device='cpu',repeat=1):
 			observation = torch.tensor(observation,device=device).unsqueeze(0)
 			action = agent.get_action(observation,done)
 			step = AgentStep(observation,action,None)
-			print(action)
 			env.render()
 			env.step(action)
 
 if __name__ == '__main__':
 
-	writer = SummaryWriter(f'runs/QMixer={USE_QMIXER}_{N_EPISODES} episodes')
+	writer = SummaryWriter(f'runs/{N_AGENTS} agents_{N_EPISODES} episodes')
 	device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-	# device = 'cpu'
+	device = 'cpu'
 	print(f'Device:{device}')
 
-	env = simple_spread_v2.env(max_cycles=MAX_CYCLES)
+	env = simple_spread_v2.env(max_cycles=MAX_CYCLES,N=N_AGENTS)
 	env.reset()
-	mixer = Mixer(env,device=device,lr=LEARNING_RATE,gamma=GAMMA,use_QMixer=USE_QMIXER)
+	mixer = Mixer(env,device=device,lr=LEARNING_RATE,gamma=GAMMA,use_QMixer=USE_QMIXER,p_dropout=P_DROPOUT)
 	buffer = deque(maxlen=BUFFER_SIZE)
 
 	rewards = []
+	losses = []
 
 	for episode_n in range(N_EPISODES):
 		epsilon = mixer.set_epsilon(episode_n)
@@ -320,14 +325,6 @@ if __name__ == '__main__':
 		rewards.append(R)
 		buffer.append(episode_experience)
 
-		if (episode_n) % PRINT_PROGRESS_PERIOD == 0:
-			R = rewards[-PRINT_PROGRESS_PERIOD:]
-			R = sum(R)/len(R)
-			print(f'Episode {episode_n}, Reward {round(R)}, Epsilon {round(epsilon,2)}')
-			writer.add_scalar('reward', R, episode_n)
-			# for agent in mixer.agents.values():
-			# 	print(list(agent.net.parameters())[0])
-
 		if len(buffer) < BATCH_SIZE:
 			continue
 
@@ -335,7 +332,22 @@ if __name__ == '__main__':
 			mixer.sync_nets()
 
 		batch = batch_from_buffer(buffer,BATCH_SIZE)
-		mixer.learn(batch)
+		loss  = mixer.learn(batch)
+		losses.append(loss)
+
+		writer.add_scalar('reward', R/N_AGENTS, episode_n)
+		writer.add_scalar('loss', loss, episode_n)
+		writer.add_scalar('epsilon', epsilon, episode_n)
+
+
+		if (episode_n) % PRINT_PROGRESS_PERIOD == 0:
+			R = rewards[-PRINT_PROGRESS_PERIOD:]
+			R = sum(R)/len(R)
+			loss = losses[-PRINT_PROGRESS_PERIOD:]
+			loss = sum(loss)/len(loss)
+			print(f'Episode {episode_n}, Reward {round(R)}, loss {round(loss,2)}')
+			# for agent in mixer.agents.values():
+			# 	print(list(agent.net.parameters())[0])
 
 		# print(list(mixer.agents['agent_0'].target_net.parameters())[-1])
 	txt = input('Press enter to show demo ("skip" to skip)')

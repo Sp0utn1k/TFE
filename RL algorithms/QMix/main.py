@@ -307,7 +307,7 @@ if __name__ == '__main__':
 
 	writer = SummaryWriter(f'runs/{N_AGENTS} agents_{N_EPISODES} episodes')
 	device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-	device = 'cpu'
+	# device = 'cpu'
 	print(f'Device:{device}')
 
 	env = simple_spread_v2.env(max_cycles=MAX_CYCLES,N=N_AGENTS)

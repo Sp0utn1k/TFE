@@ -65,7 +65,6 @@ class Agent:
 		self.gamma = kwargs.get('gamma',.9)
 
 		self.loss_fn = nn.MSELoss()
-		# self.loss_fn = nn.SmoothL1Loss()
 		self.optimizer = torch.optim.Adam(self.net.parameters())
 
 		if 'epsilon_decay' in kwargs.keys():

@@ -6,27 +6,25 @@ from collections import namedtuple, deque
 import copy
 import math
 from tensorboardX import SummaryWriter
-import time
 
-BUFFER_SIZE = 1024*32
-BATCH_SIZE = 1024
+BUFFER_SIZE = 512
+BATCH_SIZE = 64
 LEARNING_RATE = 1e-4
 N_EPISODES = 12000
 N_demos = 5
 GAMMA = .9
-PRINT_PROGRESS_PERIOD = 100
+PRINT_PROGRESS_PERIOD = 50
 NET_SYNC_PERIOD = 2
-MAX_CYCLES = 32
+MAX_CYCLES = 64
 USE_QMIXER = True
 P_DROPOUT = 0
-N_AGENTS = 2
-USE_GPU = True
+N_AGENTS = 1
 
 EPSILON_DECAY = {
 				'period': 0.8*N_EPISODES,
 				'start':1,
-				'stop':.05,
-				'shape':'linear'
+				'stop':.02,
+				'shape':'exponential'
 				}
 
 class QMixer(nn.Module):
@@ -123,7 +121,7 @@ class Mixer:
 	def get_Q_agents(self,batch):
 		Qagents = []
 		for agent in self.agent_names:
-			obs =  torch.cat([step[agent].obs for step in batch])
+			obs =  torch.cat([step.obs for step in batch[agent]])
 			Q = self.agents[agent].net(obs).unsqueeze(1)
 			Qagents += [Q]
 		Qagents = torch.cat(Qagents,dim=1)
@@ -132,7 +130,7 @@ class Mixer:
 	def get_Q_target_agents(self,batch):
 		Qagents = []
 		for agent in self.agent_names:
-			obs =  torch.cat([step[agent].next_obs for step in batch])
+			obs =  torch.cat([step.next_obs for step in batch[agent]])
 			Q = self.agents[agent].target_net(obs).unsqueeze(1)
 			Qagents += [Q]
 		Qagents = torch.cat(Qagents,dim=1)
@@ -140,16 +138,16 @@ class Mixer:
 
 	def learn(self,batch):
 
-		S = torch.cat([step['tot'].state for step in batch])
-		S_ = torch.cat([step['tot'].next_state for step in batch])
-		A = torch.tensor([[step[a].action for step in batch] for a in self.agent_names],device=device)
+		S = torch.cat([step.state for step in batch['tot']])
+		S_ = torch.cat([step.next_state for step in batch['tot']])
+		A = torch.tensor([[step.action for step in batch[a]] for a in self.agent_names],device=device)
 		A = A.transpose(0,1).unsqueeze(2)
-		dones = torch.tensor([step['tot'].done for step in batch],device=device)
+		dones = torch.tensor([step.done for step in batch['tot']],device=device)
 
 		Qagents = self.get_Q_agents(batch).gather(2,A).squeeze(2)
 		Qtot = self.net(Qagents,S)
 
-		R = torch.tensor([step['tot'].reward for step in batch],device=device)
+		R = torch.tensor([step.reward for step in batch['tot']],device=device)
 
 		with torch.no_grad():
 			Qagents_target = self.get_Q_target_agents(batch).max(2).values
@@ -168,7 +166,7 @@ class Mixer:
 		return loss.item()
 
 class AgentDQN(nn.Module):
-	def __init__(self,n_inputs,n_outputs,hidden_layers=[],device='cpu',p_dropout=0):
+	def __init__(self,n_inputs,n_outputs,hidden_layers=[],device='cpu',p_dropout=.3):
 		super(AgentDQN,self).__init__()
 		net = []
 		layers = [n_inputs] + hidden_layers + [n_outputs]
@@ -244,54 +242,50 @@ class MixerStep:
 		self.next_state = next_state
 		self.done = done
 
-def generate_episode(buffer,env,agents,device='cpu',render=False):
+def generate_episode(env,agents,device='cpu',render=False):
 
 	env.reset()
 	last_agent = env.agents[-1]
-	episode = deque()
+	episode = {a:deque() for a in agents.keys()}
+	episode['tot'] = deque()
 
 	R = 0.0
 	total_reward = 0.0
-	i = 0
-	transition = {}
+
 	for agent_name in env.agent_iter():
-		
 		agent = agents[agent_name]
 		observation, reward, done, _ = env.last()
 		observation = torch.tensor(observation,device=device).unsqueeze(0)
 		action = agent.get_action(observation,done)
 		step = AgentStep(observation,action,None)
 		R += reward
-		if i:
-			episode[-1][agent_name].next_obs = observation
-
-		transition[agent_name] = step
-
+		if len(episode[agent_name]):
+			episode[agent_name][-1].next_obs = observation
+		if not done:
+			episode[agent_name].append(step)
 		if agent_name == last_agent:
 			state = torch.tensor(env.state(),device=device).unsqueeze(0)
 			step = MixerStep(state,None,None,None)
-			if i:
-				episode[-1]['tot'].reward = R
-				episode[-1]['tot'].next_state = state
-				episode[-1]['tot'].done = all(env.dones.values())
+			if len(episode['tot']):
+				episode['tot'][-1].reward = R
+				episode['tot'][-1].next_state = state
+				episode['tot'][-1].done = all(env.dones.values())
 				total_reward += R
 				R = 0.0
-			transition['tot'] = step
-			i += 1
-			episode.append(transition)
-			transition = {}
+			episode['tot'].append(step)
 		if render:
 			env.render()
-		
 		env.step(action)
 
-	episode.pop()
-	buffer.extend(episode)
-
-	return total_reward
+	episode['tot'].pop()
+	return episode,total_reward
 
 def batch_from_buffer(buffer,N_samples):
-	batch = random.sample(buffer,N_samples)
+	sample = random.sample(buffer,N_samples)
+	batch = {a:deque() for a in sample[0].keys()}
+	for episode in sample:
+		for k in batch.keys():
+			batch[k] += episode[k]
 	return batch
 
 def show_demo(env,agents,device='cpu',repeat=1):
@@ -311,15 +305,14 @@ def show_demo(env,agents,device='cpu',repeat=1):
 
 if __name__ == '__main__':
 
-	writer = SummaryWriter(f'runs/{N_AGENTS} agents')
-	device = torch.device('cuda' if torch.cuda.is_available() and USE_GPU else 'cpu')
+	writer = SummaryWriter(f'runs/{N_AGENTS} agents_{N_EPISODES} episodes')
+	device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+	# device = 'cpu'
 	print(f'Device:{device}')
 
 	env = simple_spread_v2.env(max_cycles=MAX_CYCLES,N=N_AGENTS)
 	env.reset()
 	mixer = Mixer(env,device=device,lr=LEARNING_RATE,gamma=GAMMA,use_QMixer=USE_QMIXER,p_dropout=P_DROPOUT)
-	
-
 	buffer = deque(maxlen=BUFFER_SIZE)
 
 	rewards = []
@@ -328,8 +321,9 @@ if __name__ == '__main__':
 	for episode_n in range(N_EPISODES):
 		epsilon = mixer.set_epsilon(episode_n)
 
-		R = generate_episode(buffer,env,mixer.agents,device=device)
+		episode_experience, R = generate_episode(env,mixer.agents,device=device)
 		rewards.append(R)
+		buffer.append(episode_experience)
 
 		if len(buffer) < BATCH_SIZE:
 			continue
@@ -343,7 +337,7 @@ if __name__ == '__main__':
 
 		writer.add_scalar('reward', R/N_AGENTS, episode_n)
 		writer.add_scalar('loss', loss, episode_n)
-		# writer.add_scalar('epsilon', epsilon, episode_n)
+		writer.add_scalar('epsilon', epsilon, episode_n)
 
 
 		if (episode_n) % PRINT_PROGRESS_PERIOD == 0:
@@ -351,7 +345,7 @@ if __name__ == '__main__':
 			R = sum(R)/len(R)
 			loss = losses[-PRINT_PROGRESS_PERIOD:]
 			loss = sum(loss)/len(loss)
-			print(f'Episode {episode_n}, Reward {round(R/N_AGENTS)}, loss {round(loss,2)}')
+			print(f'Episode {episode_n}, Reward {round(R)}, loss {round(loss,2)}')
 			# for agent in mixer.agents.values():
 			# 	print(list(agent.net.parameters())[0])
 

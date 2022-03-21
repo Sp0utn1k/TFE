@@ -5,7 +5,7 @@ import pandas as pd
 
 SIZE = [3,10]
 ACTIONS = ['up','down','left','right']
-N_epsiodes = 300
+N_epsiodes = 100
 
 class Environment:
 
@@ -45,9 +45,9 @@ class Environment:
 		if self.pos == self.goal:
 			return 0.0
 		elif self.pos in self.cliff:
-			return -100.0
-		else:
 			return -1.0
+		else:
+			return -.1
 
 	def display(self,twait=0.1):
 		os.system('clear')
@@ -77,7 +77,7 @@ class Qlearning:
     self.actions = actions
     self.action_space = len(actions)
     self.actions = actions
-    self.table = pd.DataFrame(data=np.zeros((self.action_space,0),dtype=np.float), index=actions, columns=None,dtype=np.float)
+    self.table = pd.DataFrame(data=np.zeros((self.action_space,0),dtype=np.float_), index=actions, columns=None,dtype=np.float_)
 
   def eps_greedy(self,S):
     agent.table = agent.table.sample(frac=1)
@@ -91,7 +91,8 @@ class Qlearning:
 
   def get_Q(self,S,A):
     if S not in self.table.columns:
-      self.table.insert(0,S,np.zeros((self.action_space,1),dtype=np.float))
+      self.table.insert(0,S,np.zeros((self.action_space,1),dtype=np.float_))
+    print(self.table)
     return self.table.at[A,S]
 
   def learn(self,S,A,R,S_,is_done=False):
@@ -119,19 +120,22 @@ if __name__ == "__main__":
 	env = Environment(size=SIZE)
 	agent = Qlearning(actions=ACTIONS,eps=0.1,alpha=0.25)
 
-	# agent.get_Q((0,1),'up')
-	# agent.table.at['down',(0,1)] = -.1
+	env.display(twait=10)
+	
+	agent.get_Q((0,1),'up')
+	agent.table.at['down',(0,1)] = -.1
 
-	# for i in range(N_epsiodes):
-	# 	env.reset()
-	# 	is_done = False
-	# 	while not is_done:
-	# 		S = env.pos
-	# 		A = agent.eps_greedy(S)
-	# 		(R,S_,is_done) = env.step(A)
-	# 		agent.learn(S,A,R,S_)
 
-	agent.eps = 0
+
+	for i in range(N_epsiodes):
+		env.reset()
+		is_done = False
+		while not is_done:
+			S = env.pos
+			A = agent.eps_greedy(S)
+			(R,S_,is_done) = env.step(A)
+			agent.learn(S,A,R,S_)
+
 	for i in range(10):
 		env.reset()
 		env.display(twait=twait)

@@ -7,15 +7,17 @@ import copy
 import math
 from tensorboardX import SummaryWriter
 import time
+import numpy as np
 
-BUFFER_SIZE = 1024*32
-BATCH_SIZE = 1024
+BUFFER_SIZE = 50000
+BATCH_SIZE = 1000
 LEARNING_RATE = 1e-4
-N_EPISODES = 12000
-N_demos = 5
+N_EPISODES = 250000
+N_demos = 4
+DEMOS_PERIOD = 10000
 GAMMA = .9
-PRINT_PROGRESS_PERIOD = 100
-NET_SYNC_PERIOD = 2
+PRINT_PROGRESS_PERIOD = 1000
+NET_SYNC_PERIOD = 10
 MAX_CYCLES = 32
 USE_QMIXER = True
 P_DROPOUT = 0
@@ -23,14 +25,14 @@ N_AGENTS = 2
 USE_GPU = True
 
 EPSILON_DECAY = {
-				'period': 0.8*N_EPISODES,
+				'period': 0.9*N_EPISODES,
 				'start':1,
-				'stop':.05,
-				'shape':'linear'
+				'stop':.01,
+				'shape':'exponential'
 				}
 
 class QMixer(nn.Module):
-	def __init__(self,state_space,n_agents,hidden_size=64,p_dropout=.3):
+	def __init__(self,state_space,n_agents,hidden_size=64,p_dropout=0):
 		super(QMixer,self).__init__()
 		print('Initializing QMixer...')
 		self.n_agents = n_agents
@@ -51,11 +53,11 @@ class QMixer(nn.Module):
 		state = self.dropout(state)
 		w1 = torch.abs(self.W1(state)).reshape((-1,self.n_agents,self.hidden_size))
 		b1 = self.B1(state).reshape((-1,1,self.hidden_size))
-		Qtot = self.ELU(torch.add(torch.bmm(Qagents.unsqueeze(1),w1),b1))
+		Qtot = self.ELU(torch.add(torch.matmul(Qagents.unsqueeze(1),w1),b1))
 
 		w2 = torch.abs(self.W2(state)).reshape((-1,self.hidden_size,1))
 		b2 = self.B2(state).reshape((-1,1,1))
-		Qtot = torch.add(torch.bmm(Qtot,w2),b2).reshape(-1)
+		Qtot = torch.add(torch.matmul(Qtot,w2),b2).reshape(-1)
 		return Qtot
 
 class VDNMixer:
@@ -86,7 +88,7 @@ class Mixer:
 		self.state_space = env.state_space.shape[0]
 
 		self.agents = {}
-		agentNet = AgentDQN(obs_space,self.action_space,hidden_layers=[('linear',64),('linear',32)],
+		agentNet = AgentDQN(obs_space,self.action_space,hidden_layers=[('linear',32),('linear',32)],
 				device=device,p_dropout=p_dropout)
 		for name in self.agent_names:
 			self.agents[name] = Agent(name,agentNet,epsilon=1,epsilon_decay=EPSILON_DECAY)
@@ -163,8 +165,6 @@ class Mixer:
 		loss.backward()
 		self.optimizer.step()
 
-		# print(f'R: {R.shape}')
-		# print(f'dones: {dones.shape}')
 		return loss.item()
 
 class AgentDQN(nn.Module):
@@ -249,6 +249,7 @@ def generate_episode(buffer,env,agents,device='cpu',render=False):
 	env.reset()
 	last_agent = env.agents[-1]
 	episode = deque()
+	n_agents = len(env.agents)
 
 	R = 0.0
 	total_reward = 0.0
@@ -261,7 +262,7 @@ def generate_episode(buffer,env,agents,device='cpu',render=False):
 		observation = torch.tensor(observation,device=device).unsqueeze(0)
 		action = agent.get_action(observation,done)
 		step = AgentStep(observation,action,None)
-		R += reward
+		R += reward/n_agents
 		if i:
 			episode[-1][agent_name].next_obs = observation
 
@@ -309,17 +310,36 @@ def show_demo(env,agents,device='cpu',repeat=1):
 			env.render()
 			env.step(action)
 
+def make_grid_demos(env,agents,device='cpu',repeat=1):
+	images = []
+	for _ in range(repeat):
+		env.reset()
+		last_agent = env.agents[-1]
+
+		for agent_name in env.agent_iter():
+			agent = agents[agent_name]
+			observation, reward, done, _ = env.last()
+			observation = torch.tensor(observation,device=device).unsqueeze(0)
+			action = agent.get_action(observation,done)
+			step = AgentStep(observation,action,None)
+			env.step(action)
+		img = env.render(mode='rgb_array')
+		env.close()
+		images.append(img)
+
+	return np.array(images)/255.0
+
 if __name__ == '__main__':
 
-	writer = SummaryWriter(f'runs/{N_AGENTS} agents')
+	writer = SummaryWriter(f'runs/{N_AGENTS} agents/')
 	device = torch.device('cuda' if torch.cuda.is_available() and USE_GPU else 'cpu')
 	print(f'Device:{device}')
 
 	env = simple_spread_v2.env(max_cycles=MAX_CYCLES,N=N_AGENTS)
 	env.reset()
 	mixer = Mixer(env,device=device,lr=LEARNING_RATE,gamma=GAMMA,use_QMixer=USE_QMIXER,p_dropout=P_DROPOUT)
-	
 
+	time.sleep(10)
 	buffer = deque(maxlen=BUFFER_SIZE)
 
 	rewards = []
@@ -341,9 +361,14 @@ if __name__ == '__main__':
 		loss  = mixer.learn(batch)
 		losses.append(loss)
 
-		writer.add_scalar('reward', R/N_AGENTS, episode_n)
+		writer.add_scalar('reward', R/MAX_CYCLES, episode_n)
 		writer.add_scalar('loss', loss, episode_n)
 		# writer.add_scalar('epsilon', epsilon, episode_n)
+
+
+		if episode_n % DEMOS_PERIOD == 0:
+			img = make_grid_demos(env,mixer.agents,device=device,repeat=N_demos)
+			writer.add_image('image',img,episode_n,dataformats='NHWC')
 
 
 		if (episode_n) % PRINT_PROGRESS_PERIOD == 0:
@@ -351,7 +376,7 @@ if __name__ == '__main__':
 			R = sum(R)/len(R)
 			loss = losses[-PRINT_PROGRESS_PERIOD:]
 			loss = sum(loss)/len(loss)
-			print(f'Episode {episode_n}, Reward {round(R/N_AGENTS)}, loss {round(loss,2)}')
+			print(f'Episode {episode_n}, Reward {round(R/MAX_CYCLES,2)}, loss {round(loss,2)}')
 			# for agent in mixer.agents.values():
 			# 	print(list(agent.net.parameters())[0])
 
@@ -362,3 +387,4 @@ if __name__ == '__main__':
 			agent.epsilon = 0
 			agent.net.eval()
 		show_demo(env,mixer.agents,device=device,repeat=N_demos)
+	writer.close()

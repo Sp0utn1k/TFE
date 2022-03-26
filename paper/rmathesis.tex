@@ -1,0 +1,52 @@
+\documentclass[english]{rmathesis}
+\usepackage{lipsum} 
+\usepackage{hyperref}
+\usepackage{epigraph}
+\usepackage{siunitx}
+\usepackage{makecell}
+
+\DeclareMathOperator*{\argmax}{arg\,max}
+\DeclareMathOperator*{\argmin}{arg\,min}
+
+
+\title{Title}
+\subtitle{Optional Subtitle}
+\rank{Second Lieutenant}
+\author{REMACLE Maximilien}
+\years{2021 -- 2022}
+\promotion{172\trilingual{$^{\text{\scriptsize ième}}$}{$^{\text{\scriptsize ste}}$}{$^{\text{\scriptsize th}}$}}
+\godfather{Maxime Séverin}
+\department{CISS}%\department{MWMW}
+\promotor{Senior Captain Koen BOECKX, Dr. ir}
+\version{1.0}
+
+\begin{document}
+	\maketitle
+	\frontmatter
+	\include{pre01}
+	\tableofcontents
+	\listoffigures
+	\listoftables
+	\printnomenclature
+	\chapter{Acknowledgments}
+	\mainmatter
+	\include{chap01}
+	
+	\part{Models and algorithms}
+	\include{chap02}
+	\include{chap03}
+	\include{chap04}
+	\include{chap05}
+	
+	\part{The environment}
+	\include{chap06}
+	
+%	\part{Implementation and results}
+%	\include{chap07}
+%	\include{chap08}
+	
+	\appendix
+	\include{app01}
+	\backmatter
+	\bibliography{rmathesis}
+\end{document}

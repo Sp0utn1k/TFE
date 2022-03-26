@@ -5,3 +5,4 @@ algorithms/__pycache__/
 figures/*.png
 .vscode/launch.json
 runs/
+tests/

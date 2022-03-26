@@ -1,10 +1,11 @@
   # Encoder:
 input_size : 2
-pre_processing_layers : [4]
-#LSTM
+output_size : 64
+pre_processing_layers : [16,32]
 num_layers : 1
-post_processing_layers : [256]
-output_size : 256
+# post_processing_layers : [256]
+rnn_size: 64
+rnn_type: 'LSTM'
 
   # Decoder:
 decoder_hidden_layers : [64,32]

@@ -10,22 +10,22 @@ import time
 import numpy as np
 
 BUFFER_SIZE = 50000
-BATCH_SIZE = 1000
+BATCH_SIZE = 100
 LEARNING_RATE = 1e-4
-N_EPISODES = 250000
+N_EPISODES = 200000
 N_demos = 4
 DEMOS_PERIOD = 10000
 GAMMA = .9
 PRINT_PROGRESS_PERIOD = 1000
 NET_SYNC_PERIOD = 10
-MAX_CYCLES = 32
+MAX_CYCLES = 25
 USE_QMIXER = True
 P_DROPOUT = 0
 N_AGENTS = 2
 USE_GPU = True
 
 EPSILON_DECAY = {
-				'period': 0.9*N_EPISODES,
+				'period': N_EPISODES,
 				'start':1,
 				'stop':.01,
 				'shape':'exponential'
